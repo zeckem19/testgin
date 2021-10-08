@@ -15,7 +15,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-// create a validator object
+// create a validator objectc c
 var validate = validator.New()
 
 // patient represents data about a Patient
@@ -27,6 +27,8 @@ type Patient struct {
 	Creation_time time.Time          `json:"creation_time"`
 	End_time      time.Time          `json:"end_time"`
 	Patient_id    string             `json:"patient_id"`
+	Kiosk_id      string             `json:"kiosk_id"`
+	Doctor_id     string             `json:"doctor_id"`
 }
 
 // albums slice to seed record album data.
@@ -39,6 +41,7 @@ type Patient struct {
 //connect to to the database and open a food collection
 
 var patientCollection *mongo.Collection = database.OpenCollection(database.Client, "patient")
+var kioskCollection *mongo.Collection = database.OpenCollection(database.Client, "kiosk")
 
 func main() {
 
@@ -53,7 +56,7 @@ func main() {
 
 	r.GET("/patients", getPatients)
 	// r.GET("/patients/:id", getPatientsByID)
-	r.POST("/register", registerPatient)
+	r.POST("/register/:kiosk_id", registerPatient)
 
 	r.Run("0.0.0.0:" + port)
 }
@@ -78,7 +81,10 @@ func getPatients(c *gin.Context) {
 
 // postAlbums adds an album from JSON received in the request body.
 func registerPatient(c *gin.Context) {
+	kiosk_id := c.Param("kiosk_id")
+
 	var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
 
 	var newPatient Patient
 
@@ -106,6 +112,7 @@ func registerPatient(c *gin.Context) {
 
 	// assign the the auto generated ID to the primary key attribute
 	newPatient.Patient_id = newPatient.ID.Hex()
+	newPatient.Kiosk_id = kiosk_id
 
 	// finally, insert to database
 	result, insertErr := patientCollection.InsertOne(ctx, newPatient)
@@ -114,24 +121,30 @@ func registerPatient(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
 		return
 	}
-	defer cancel()
+	filter := bson.D{{"id", kiosk_id}}
+	update := bson.D{
+		{"$push", bson.D{
+			{"queue", newPatient},
+		}},
+	}
+	if result != nil {
+		kioskResult, updateErr := kioskCollection.UpdateOne(ctx, filter, update)
+		if updateErr != nil {
+			msg := fmt.Sprintf("Patient not queued")
+			c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+			return
+		}
+		if kioskResult != nil {
+			// trigger check_kiosk_empty()
+			_, err := http.Post("medlyves-fastapi:8000/kiosk/check/K00001", "application/json", nil)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err})
+			} else {
+				c.IndentedJSON(http.StatusCreated, kioskResult)
+			}
+		}
 
-	// return newPatient
-	c.IndentedJSON(http.StatusCreated, result)
+	}
+	c.IndentedJSON(http.StatusInternalServerError, "Unknown error - possibly no such kiosk")
+
 }
-
-// getAlbumByID locates the album whose ID value matches the id
-// parameter sent by the client, then returns that album as a response.
-// func getPatientsByID(c *gin.Context) {
-// 	id := c.Param("id")
-
-// 	// Loop through the list of albums, looking for
-// 	// an album whose ID value matches the parameter.
-// 	for _, a := range patients {
-// 		if a.ID == id {
-// 			c.IndentedJSON(http.StatusOK, a)
-// 			return
-// 		}
-// 	}
-// 	c.IndentedJSON(http.StatusNotFound, gin.H{"message": "album not found"})
-// }
