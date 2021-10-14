@@ -24,12 +24,13 @@ patient_collection.delete_many({})
 kiosk = {
     'id':'K00000',
     'state':'default',
-    'creation_time':datetime.now(),
+    'creation_datetime':datetime.now(),
     'name':'TEST KIOSK2',
     'address':'MOCK ADDRESS',
     'image':'',
     'location':'',
-    'queue':[]
+    'queue':[],
+    'current':None,
 }
 
 kiosk_collection.insert_one(kiosk)
